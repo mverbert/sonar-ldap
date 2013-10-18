@@ -19,19 +19,21 @@
  */
 package org.sonar.plugins.ldap;
 
+import java.util.Map;
+
+import javax.annotation.Nullable;
+import javax.naming.NamingException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sonar.api.security.ExternalUsersProvider;
 import org.sonar.api.security.UserDetails;
 import org.sonar.api.utils.SonarException;
 
-import javax.annotation.Nullable;
-import javax.naming.NamingException;
-import javax.naming.directory.Attribute;
-import javax.naming.directory.Attributes;
-import javax.naming.directory.SearchResult;
-
-import java.util.Map;
+import com.unboundid.ldap.sdk.Attribute;
+import com.unboundid.ldap.sdk.LDAPException;
+import com.unboundid.ldap.sdk.SearchResult;
+import com.unboundid.ldap.sdk.SearchResultEntry;
 
 /**
  * @author Evgeny Mandrikov
@@ -47,11 +49,11 @@ public class LdapUsersProvider extends ExternalUsersProvider {
     this.userMappings = userMappings;
   }
 
-  private static String getAttributeValue(@Nullable Attribute attribute) throws NamingException {
+  private static String getAttributeValue(@Nullable Attribute attribute) {
     if (attribute == null) {
       return "";
     }
-    return (String) attribute.get();
+    return attribute.getValue();
   }
 
   /**
@@ -69,12 +71,12 @@ public class LdapUsersProvider extends ExternalUsersProvider {
     UserDetails details = null;
     SonarException sonarException = null;
     for (String serverKey : userMappings.keySet()) {
-      SearchResult searchResult = null;
+      SearchResultEntry searchResult = null;
       try {
         searchResult = userMappings.get(serverKey).createSearch(contextFactories.get(serverKey), username)
             .returns(userMappings.get(serverKey).getEmailAttribute(), userMappings.get(serverKey).getRealNameAttribute())
             .findUnique();
-      } catch (NamingException e) {
+      } catch (LDAPException e) {
         // just in case if Sonar silently swallowed exception
         LOG.debug(e.getMessage(), e);
         sonarException = new SonarException("Unable to retrieve details for user " + username + " in " + serverKey, e);
@@ -84,7 +86,7 @@ public class LdapUsersProvider extends ExternalUsersProvider {
           details = mapUserDetails(serverKey, searchResult);
           // if no exceptions occur, we found the user and mapped his details.
           break;
-        } catch (NamingException e) {
+        } catch (LDAPException e) {
           // just in case if Sonar silently swallowed exception
           LOG.debug(e.getMessage(), e);
           sonarException = new SonarException("Unable to retrieve details for user " + username + " in " + serverKey, e);
@@ -109,12 +111,10 @@ public class LdapUsersProvider extends ExternalUsersProvider {
    * @return If no exceptions are thrown, a {@link UserDetails} object containing the values from LDAP.
    * @throws NamingException In case the communication or mapping to the LDAP server fails.
    */
-  private UserDetails mapUserDetails(String serverKey, SearchResult searchResult) throws NamingException {
-    Attributes attributes = searchResult.getAttributes();
-    UserDetails details;
-    details = new UserDetails();
-    details.setName(getAttributeValue(attributes.get(userMappings.get(serverKey).getRealNameAttribute())));
-    details.setEmail(getAttributeValue(attributes.get(userMappings.get(serverKey).getEmailAttribute())));
+  private UserDetails mapUserDetails(String serverKey, SearchResultEntry searchResult) throws LDAPException {
+    UserDetails details = new UserDetails();
+    details.setName(getAttributeValue(searchResult.getAttribute(userMappings.get(serverKey).getRealNameAttribute())));
+    details.setEmail(getAttributeValue(searchResult.getAttribute(userMappings.get(serverKey).getEmailAttribute())));
     return details;
   }
 

@@ -19,17 +19,15 @@
  */
 package org.sonar.plugins.ldap;
 
-import com.google.common.base.Objects;
+import java.util.Arrays;
+
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.LoggerFactory;
 import org.sonar.api.config.Settings;
-import org.sonar.api.utils.SonarException;
 
-import javax.naming.NamingException;
-import javax.naming.directory.Attribute;
-import javax.naming.directory.SearchResult;
-
-import java.util.Arrays;
+import com.google.common.base.Objects;
+import com.unboundid.ldap.sdk.Attribute;
+import com.unboundid.ldap.sdk.SearchResultEntry;
 
 /**
  * @author Evgeny Mandrikov
@@ -78,13 +76,13 @@ public class LdapGroupMapping {
   /**
    * Search for this mapping.
    */
-  public LdapSearch createSearch(LdapContextFactory contextFactory, SearchResult user) {
+  public LdapSearch createSearch(LdapContextFactory contextFactory, SearchResultEntry user) {
     String[] attrs = getRequiredUserAttributes();
     String[] parameters = new String[attrs.length];
     for (int i = 0; i < parameters.length; i++) {
       String attr = attrs[i];
       if ("dn".equals(attr)) {
-        parameters[i] = user.getNameInNamespace();
+        parameters[i] = user.getDN();
       } else {
         parameters[i] = getAttributeValue(user, attr);
       }
@@ -96,16 +94,12 @@ public class LdapGroupMapping {
         .returns(getIdAttribute());
   }
 
-  private static String getAttributeValue(SearchResult user, String attributeId) {
-    Attribute attribute = user.getAttributes().get(attributeId);
+  private static String getAttributeValue(SearchResultEntry user, String attributeId) {
+    Attribute attribute = user.getAttribute(attributeId);
     if (attribute == null) {
       return null;
     }
-    try {
-      return (String) attribute.get();
-    } catch (NamingException e) {
-      throw new SonarException(e);
-    }
+    return attribute.getValue();
   }
 
   /**

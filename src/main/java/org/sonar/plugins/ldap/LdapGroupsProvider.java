@@ -19,23 +19,25 @@
  */
 package org.sonar.plugins.ldap;
 
-import com.google.common.collect.Sets;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-import org.sonar.api.security.ExternalGroupsProvider;
-import org.sonar.api.utils.SonarException;
-
-import javax.naming.NamingEnumeration;
-import javax.naming.NamingException;
-import javax.naming.directory.Attributes;
-import javax.naming.directory.SearchResult;
-
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+
+import javax.naming.NamingException;
+import javax.naming.directory.Attributes;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.sonar.api.security.ExternalGroupsProvider;
+import org.sonar.api.utils.SonarException;
+
+import com.google.common.collect.Sets;
+import com.unboundid.ldap.sdk.LDAPException;
+import com.unboundid.ldap.sdk.SearchResult;
+import com.unboundid.ldap.sdk.SearchResultEntry;
 
 /**
  * @author Evgeny Mandrikov
@@ -66,17 +68,17 @@ public class LdapGroupsProvider extends ExternalGroupsProvider {
         // No group mapping for this ldap instance.
         continue;
       }
-      SearchResult searchResult = searchUserGroups(username, sonarExceptions, serverKey);
+      SearchResultEntry searchResult = searchUserGroups(username, sonarExceptions, serverKey);
 
       if (searchResult != null) {
         try {
-          NamingEnumeration<SearchResult> result = groupMappings
+          SearchResult result = groupMappings
               .get(serverKey)
               .createSearch(contextFactories.get(serverKey), searchResult).find();
           groups.addAll(mapGroups(serverKey, result));
           // if no exceptions occur, we found the user and his groups and mapped his details.
           break;
-        } catch (NamingException e) {
+        } catch (LDAPException e) {
           // just in case if Sonar silently swallowed exception
           LOG.debug(e.getMessage(), e);
           sonarExceptions.add(new SonarException("Unable to retrieve groups for user " + username + " in " + serverKey, e));
@@ -103,15 +105,15 @@ public class LdapGroupsProvider extends ExternalGroupsProvider {
     }
   }
 
-  private SearchResult searchUserGroups(String username, List<SonarException> sonarExceptions, String serverKey) {
-    SearchResult searchResult = null;
+  private SearchResultEntry searchUserGroups(String username, List<SonarException> sonarExceptions, String serverKey) {
+    SearchResultEntry searchResult = null;
     try {
       LOG.debug("Requesting groups for user {}", username);
 
       searchResult = userMappings.get(serverKey).createSearch(contextFactories.get(serverKey), username)
           .returns(groupMappings.get(serverKey).getRequiredUserAttributes())
           .findUnique();
-    } catch (NamingException e) {
+    } catch (LDAPException e) {
       // just in case if Sonar silently swallowed exception
       LOG.debug(e.getMessage(), e);
       sonarExceptions.add(new SonarException("Unable to retrieve groups for user " + username + " in " + serverKey, e));
@@ -127,12 +129,10 @@ public class LdapGroupsProvider extends ExternalGroupsProvider {
    * @return A {@link Collection} of groups the user is member of.
    * @throws NamingException
    */
-  private Collection<? extends String> mapGroups(String serverKey, NamingEnumeration<SearchResult> searchResult) throws NamingException {
+  private Collection<? extends String> mapGroups(String serverKey, SearchResult searchResult) {
     HashSet<String> groups = new HashSet<String>();
-    while (searchResult.hasMoreElements()) {
-      SearchResult obj = (SearchResult) searchResult.nextElement();
-      Attributes attributes = obj.getAttributes();
-      String groupId = (String) attributes.get(groupMappings.get(serverKey).getIdAttribute()).get();
+    for (SearchResultEntry obj : searchResult.getSearchEntries()) {
+      String groupId = obj.getAttribute(groupMappings.get(serverKey).getIdAttribute()).getValue();
       groups.add(groupId);
     }
     return groups;

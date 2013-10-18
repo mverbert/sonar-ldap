@@ -19,19 +19,20 @@
  */
 package org.sonar.plugins.ldap;
 
+import java.util.Map;
+
+import javax.security.auth.login.Configuration;
+import javax.security.auth.login.LoginContext;
+import javax.security.auth.login.LoginException;
+
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.sonar.api.security.LoginPasswordAuthenticator;
 
-import javax.naming.NamingException;
-import javax.naming.directory.InitialDirContext;
-import javax.naming.directory.SearchResult;
-import javax.security.auth.login.Configuration;
-import javax.security.auth.login.LoginContext;
-import javax.security.auth.login.LoginException;
-
-import java.util.Map;
+import com.unboundid.ldap.sdk.LDAPConnection;
+import com.unboundid.ldap.sdk.LDAPException;
+import com.unboundid.ldap.sdk.SearchResultEntry;
 
 /**
  * @author Evgeny Mandrikov
@@ -63,10 +64,10 @@ public class LdapAuthenticator implements LoginPasswordAuthenticator {
       if (contextFactories.get(ldapKey).isSasl()) {
         principal = login;
       } else {
-        final SearchResult result;
+        final SearchResultEntry result;
         try {
           result = userMappings.get(ldapKey).createSearch(contextFactories.get(ldapKey), login).findUnique();
-        } catch (NamingException e) {
+        } catch (LDAPException e) {
           LOG.debug("User {} not found in server {}: {}", new Object[] {login, ldapKey, e.getMessage()});
           continue;
         }
@@ -74,7 +75,7 @@ public class LdapAuthenticator implements LoginPasswordAuthenticator {
           LOG.debug("User {} not found in " + ldapKey, login);
           continue;
         }
-        principal = result.getNameInNamespace();
+        principal = result.getDN();
       }
       boolean passwordValid;
       if (contextFactories.get(ldapKey).isGssapi()) {
@@ -94,15 +95,15 @@ public class LdapAuthenticator implements LoginPasswordAuthenticator {
       LOG.debug("Password is blank.");
       return false;
     }
-    InitialDirContext context = null;
+    LDAPConnection context = null;
     try {
-      context = contextFactories.get(ldapKey).createUserContext(principal, password);
+      context = contextFactories.get(ldapKey).createUserConnection(principal, password);
       return true;
-    } catch (NamingException e) {
+    } catch (LDAPException e) {
       LOG.debug("Password not valid for user {} in server {}: {}", new Object[] {principal, ldapKey, e.getMessage()});
       return false;
     } finally {
-      ContextHelper.closeQuetly(context);
+      ConnectionHelper.closeQuetly(context);
     }
   }
 

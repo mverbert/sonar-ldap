@@ -19,16 +19,22 @@
  */
 package org.sonar.plugins.ldap;
 
-import com.google.common.base.Objects;
+import java.util.Arrays;
+
+import javax.naming.NamingException;
+import javax.naming.directory.SearchControls;
+
+import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.naming.NamingEnumeration;
-import javax.naming.NamingException;
-import javax.naming.directory.InitialDirContext;
-import javax.naming.directory.SearchControls;
-import javax.naming.directory.SearchResult;
-import java.util.Arrays;
+import com.google.common.base.Objects;
+import com.unboundid.ldap.sdk.LDAPConnection;
+import com.unboundid.ldap.sdk.LDAPException;
+import com.unboundid.ldap.sdk.ResultCode;
+import com.unboundid.ldap.sdk.SearchResult;
+import com.unboundid.ldap.sdk.SearchResultEntry;
+import com.unboundid.ldap.sdk.SearchScope;
 
 /**
  * Fluent API for building LDAP queries.
@@ -42,7 +48,7 @@ public class LdapSearch {
   private final LdapContextFactory contextFactory;
 
   private String baseDn;
-  private int scope = SearchControls.SUBTREE_SCOPE;
+  private SearchScope scope = SearchScope.SUB;
   private String request;
   private String[] parameters;
   private String[] returningAttributes;
@@ -70,12 +76,12 @@ public class LdapSearch {
    * @see SearchControls#SUBTREE_SCOPE
    * @see SearchControls#OBJECT_SCOPE
    */
-  public LdapSearch setScope(int scope) {
+  public LdapSearch setScope(SearchScope scope) {
     this.scope = scope;
     return this;
   }
 
-  public int getScope() {
+  public SearchScope getScope() {
     return scope;
   }
 
@@ -118,20 +124,23 @@ public class LdapSearch {
   /**
    * @throws NamingException if unable to perform search
    */
-  public NamingEnumeration<SearchResult> find() throws NamingException {
+  public SearchResult find() throws LDAPException {
     LOG.debug("Search: {}", this);
-    NamingEnumeration<SearchResult> result;
-    InitialDirContext context = null;
+    SearchResult result;
+    LDAPConnection context = null;
     boolean threw = false;
     try {
-      context = contextFactory.createBindContext();
-      SearchControls controls = new SearchControls();
-      controls.setSearchScope(scope);
-      controls.setReturningAttributes(returningAttributes);
-      result = context.search(baseDn, request, parameters, controls);
+      context = contextFactory.createConnection();
+      
+      String req = request;
+      for (int i = 0; i < parameters.length; i++) {
+          req = StringUtils.replace(req, "{" + i + "}", parameters[i]);
+      }
+      
+      result = context.search(baseDn, this.scope, req, returningAttributes);
       threw = true;
     } finally {
-      ContextHelper.close(context, threw);
+      ConnectionHelper.close(context, threw);
     }
     return result;
   }
@@ -140,16 +149,17 @@ public class LdapSearch {
    * @return result, or null if not found
    * @throws NamingException if unable to perform search, or non unique result
    */
-  public SearchResult findUnique() throws NamingException {
-    NamingEnumeration<SearchResult> result = find();
-    if (result.hasMore()) {
-      SearchResult obj = result.next();
-      if (!result.hasMore()) {
-        return obj;
-      }
-      throw new NamingException("Non unique result for " + toString());
+  public SearchResultEntry findUnique() throws LDAPException {
+    SearchResult result = find();
+    int entryCount = result.getEntryCount();
+    switch (entryCount) {
+    case 0:
+    	return null;
+    case 1:
+    	return result.getSearchEntries().get(0);
+    default:
+    	throw new LDAPException(ResultCode.INAPPROPRIATE_MATCHING, "Non unique result for " + toString());
     }
-    return null;
   }
 
   @Override
@@ -164,15 +174,7 @@ public class LdapSearch {
   }
 
   private String scopeToString() {
-    switch (scope) {
-      case SearchControls.ONELEVEL_SCOPE:
-        return "onelevel";
-      case SearchControls.OBJECT_SCOPE:
-        return "object";
-      case SearchControls.SUBTREE_SCOPE:
-      default:
-        return "subtree";
-    }
+	  return scope.toString();
   }
 
 }

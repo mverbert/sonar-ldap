@@ -19,21 +19,24 @@
  */
 package org.sonar.plugins.ldap;
 
+import javax.annotation.Nullable;
+import javax.naming.NamingException;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.annotation.Nullable;
-import javax.naming.Context;
-import javax.naming.NamingException;
+import com.unboundid.ldap.sdk.LDAPConnection;
+import com.unboundid.ldap.sdk.LDAPException;
+import com.unboundid.ldap.sdk.ResultCode;
 
 /**
  * @author Evgeny Mandrikov
  */
-public final class ContextHelper {
+public final class ConnectionHelper {
 
-  private static final Logger LOG = LoggerFactory.getLogger(ContextHelper.class);
+  private static final Logger LOG = LoggerFactory.getLogger(ConnectionHelper.class);
 
-  private ContextHelper() {
+  private ConnectionHelper() {
   }
 
   /**
@@ -54,28 +57,30 @@ public final class ContextHelper {
    * </pre>
    *
    * @param context the {@code Context} object to be closed, or null, in which case this method does nothing
-   * @param swallowIOException if true, don't propagate {@code NamingException} thrown by the {@code close} method
+   * @param swallowException if true, don't propagate {@code NamingException} thrown by the {@code close} method
    * @throws NamingException if {@code swallowIOException} is false and {@code close} throws a {@code NamingException}.
    */
-  public static void close(@Nullable Context context, boolean swallowIOException) throws NamingException {
+  public static void close(@Nullable LDAPConnection context, boolean swallowException) throws LDAPException {
     if (context == null) {
       return;
     }
     try {
       context.close();
-    } catch (NamingException e) {
-      if (swallowIOException) {
-        LOG.warn("NamingException thrown while closing context.", e);
+    } catch (Exception e) {
+      if (swallowException) {
+        LOG.warn("Exception thrown while closing context.", e);
       } else {
-        throw e;
+    	  if (e instanceof LDAPException)
+    		  throw (LDAPException) e;
+        throw new LDAPException(ResultCode.OTHER, e);
       }
     }
   }
 
-  public static void closeQuetly(@Nullable Context context) {
+  public static void closeQuetly(@Nullable LDAPConnection context) {
     try {
       close(context, true);
-    } catch (NamingException e) {
+    } catch (Exception e) {
       LOG.error("Unexpected NamingException", e);
     }
   }
